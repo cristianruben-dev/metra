@@ -3,6 +3,7 @@
 import { renderPasswordResetEmail } from '@/components/emails/password-reset-email'
 import { FROM_EMAIL, transporter } from '@/lib/mail'
 import { prisma } from '@/lib/prisma'
+import { z } from 'zod'
 
 function generateOTP(): string {
 	return Math.floor(100000 + Math.random() * 900000).toString()
@@ -10,12 +11,14 @@ function generateOTP(): string {
 
 export async function forgotPasswordAction(email: string) {
 	try {
-		if (!email) {
-			return { error: 'Email is required' }
+		const parsedEmail = z.string().max(254).email().safeParse(email)
+		if (!parsedEmail.success) {
+			return { error: 'Invalid email address' }
 		}
+		const normalizedEmail = parsedEmail.data.toLowerCase()
 
 		const user = await prisma.user.findUnique({
-			where: { email: email.toLowerCase() },
+			where: { email: normalizedEmail },
 		})
 
 		if (!user) {
@@ -28,7 +31,7 @@ export async function forgotPasswordAction(email: string) {
 		const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
 		const recentTokens = await prisma.passwordResetToken.count({
 			where: {
-				email: email.toLowerCase(),
+				email: normalizedEmail,
 				createdAt: { gte: oneHourAgo },
 			},
 		})
@@ -42,14 +45,14 @@ export async function forgotPasswordAction(email: string) {
 		const expiresAt = new Date(Date.now() + 15 * 60 * 1000)
 
 		const resetToken = await prisma.passwordResetToken.create({
-			data: { email: email.toLowerCase(), token, code, expiresAt },
+			data: { email: normalizedEmail, token, code, expiresAt },
 		})
 
 		try {
 			const emailHtml = renderPasswordResetEmail(code)
 			await transporter.sendMail({
 				from: FROM_EMAIL,
-				to: email,
+				to: normalizedEmail,
 				subject: 'Código de Verificación - Restablecer Contraseña',
 				html: emailHtml,
 			})
